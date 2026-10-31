@@ -1,0 +1,6 @@
+{
+  "name": "Reyplace Ecosistema - Portal de Sistemas 3D",
+  "description": "Portal interactivo 3D con tecnología WebGL avanzada, animaciones fluidas, órbita estelar y navegación intuitiva para ecosistemas de sistemas y herramientas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
