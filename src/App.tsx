@@ -30,6 +30,7 @@ import { MediaViewerModal } from './components/MediaViewerModal';
 import { BrandIdentityModal } from './components/BrandIdentityModal';
 import { DraggableWidget } from './components/DraggableWidget';
 import { WidgetsMenu } from './components/WidgetsMenu';
+import { MapView } from './components/MapView';
 import { soundManager } from './utils/audio';
 import { Eye, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -450,6 +451,9 @@ export default function App() {
 
         {viewMode === 'terminal' && (
           <TerminalView systems={systems} onSelectSystem={setSelectedSystem} />
+        )}
+        {viewMode === 'map' && (
+          <MapView apiKey="AIzaSyAplMBJm1FdzyevfkgnnKSDj3juv-6tnws" />
         )}
       </main>
 

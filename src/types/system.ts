@@ -37,7 +37,7 @@ export interface SystemPortal {
 
 export type PlanetTheme = 'real-earth' | 'oceanic' | 'cyber' | 'cyber-industrial' | 'nebula' | 'aurora';
 
-export type ViewMode = 'orbit' | 'matrix' | 'radar' | 'terminal';
+export type ViewMode = 'orbit' | 'matrix' | 'radar' | 'terminal' | 'map';
 
 export type AudioMode = 'soundscape' | 'music-player' | 'frequencies';
 

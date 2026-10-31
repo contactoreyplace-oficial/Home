@@ -156,6 +156,23 @@ export const ControlDock: React.FC<ControlDockProps> = ({
               <Terminal className="w-3.5 h-3.5" />
               <span className="hidden xs:inline">Terminal</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundManager.playOrbitTick();
+                onViewModeChange('map');
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                viewMode === 'map'
+                  ? 'bg-[#76fbe5] text-[#05171d] font-bold shadow-[0_0_12px_rgba(118,251,229,0.3)]'
+                  : 'text-[#a8cbc7] hover:text-white'
+              }`}
+              title="Mapa de Sistemas"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">Mapa</span>
+            </button>
           </div>
 
           {/* Quick Actions (Pause, Audio, Themes, Settings) */}
