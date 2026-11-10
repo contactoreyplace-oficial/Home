@@ -1154,6 +1154,27 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               </label>
             </div>
 
+            {/* Modo Ahorro (Battery Saver) Toggle */}
+            <div className="p-3.5 rounded-2xl bg-[#06151c] border border-[#315258]">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <span className="font-mono text-xs text-white font-bold block flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                    Modo Ahorro de Batería
+                  </span>
+                  <span className="text-[10px] text-[#a8cbc7]">
+                    Reduce la tasa de refresco 3D, limita FPS y desactiva efectos post-procesado intensivos en móviles.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={config.design.batterySaver}
+                  onChange={(e) => handleUpdateDesign('batterySaver', e.target.checked)}
+                  className="w-5 h-5 accent-[#10b981]"
+                />
+              </label>
+            </div>
+
             {/* Weather Overlay Controls */}
             <div className="p-3.5 rounded-2xl bg-[#06151c] border border-[#315258] space-y-3">
               <div className="flex items-center justify-between">

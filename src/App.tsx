@@ -33,6 +33,8 @@ import { WidgetsMenu } from './components/WidgetsMenu';
 import { MapView } from './components/MapView';
 import { EnergyPulseWave } from './components/EnergyPulseWave';
 import { CommandPalette } from './components/CommandPalette';
+import { SystemAnalyticsModal } from './components/SystemAnalyticsModal';
+import { WebGLDiagnosticsModal } from './components/WebGLDiagnosticsModal';
 import { WeatherOverlay } from './components/WeatherOverlay';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { CelestialSvgBackground } from './components/CelestialSvgBackground';
@@ -40,6 +42,7 @@ import { CinematicVideoBackground } from './components/CinematicVideoBackground'
 import { LightTrailOverlay } from './components/LightTrailOverlay';
 import { ReyplaceCrownHolo } from './components/ReyplaceCrownHolo';
 import { DynamicIslandCapsule } from './components/DynamicIslandCapsule';
+import { FloatingNotificationCenter } from './components/FloatingNotificationCenter';
 import { soundManager } from './utils/audio';
 import { tacticalFeedback } from './utils/tacticalFeedback';
 import { Eye, ChevronDown, ChevronUp, X, Radio, Newspaper, Cloud, Volume2, TerminalSquare, Compass } from 'lucide-react';
@@ -231,8 +234,11 @@ export default function App() {
     setIsMediaViewerOpen(true);
   };
 
-  // Command Palette state
+  // Command Palette & Analytics / Diagnostics state
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+  const [analyticsModalOpen, setAnalyticsModalOpen] = useState<boolean>(false);
+  const [diagnosticsModalOpen, setDiagnosticsModalOpen] = useState<boolean>(false);
+  const [glitchActive, setGlitchActive] = useState<boolean>(false);
 
   // Subtle tactical screen shake recoil state
   const [shakeClass, setShakeClass] = useState<string>('');
@@ -246,8 +252,19 @@ export default function App() {
       return () => clearTimeout(t);
     };
 
+    const handleGlitch = () => {
+      setGlitchActive(true);
+      tacticalFeedback.trigger('heavy', 'impact');
+      const t = setTimeout(() => setGlitchActive(false), 500);
+      return () => clearTimeout(t);
+    };
+
     window.addEventListener('reyplace-tactical-shake', handleShake);
-    return () => window.removeEventListener('reyplace-tactical-shake', handleShake);
+    window.addEventListener('reyplace-ui-glitch', handleGlitch);
+    return () => {
+      window.removeEventListener('reyplace-tactical-shake', handleShake);
+      window.removeEventListener('reyplace-ui-glitch', handleGlitch);
+    };
   }, []);
 
   // Keyboard shortcut listener
@@ -289,7 +306,7 @@ export default function App() {
   const currentlyHoveredSystem = hoveredIndex !== null ? systems[hoveredIndex] : null;
 
   return (
-    <div className={`relative w-full min-h-screen bg-[#02060c] text-[#f0faf8] overflow-hidden flex flex-col font-sans select-none ${shakeClass}`}>
+    <div className={`relative w-full min-h-screen bg-[#02060c] text-[#f0faf8] overflow-hidden flex flex-col font-sans select-none ${shakeClass} ${glitchActive ? 'ui-glitch-active' : ''}`}>
       {/* Offline Mode Indicator (Super PWA) */}
       <OfflineIndicator />
 
@@ -496,6 +513,7 @@ export default function App() {
             }
           }}
           cinematicMode={cinematicMode}
+          batterySaver={config.design.batterySaver}
         />
 
         {/* Energy Pulse Wave Post-Processing Effect */}
@@ -759,7 +777,25 @@ export default function App() {
           setEditingIndex(0);
           setSettingsOpen(true);
         }}
+        onOpenAnalytics={() => setAnalyticsModalOpen(true)}
+        onOpenDiagnostics={() => setDiagnosticsModalOpen(true)}
       />
+
+      {/* System Usage Analytics Modal (D3.js) */}
+      <SystemAnalyticsModal
+        isOpen={analyticsModalOpen}
+        onClose={() => setAnalyticsModalOpen(false)}
+        systems={systems}
+      />
+
+      {/* WebGL Diagnostics Modal */}
+      <WebGLDiagnosticsModal
+        isOpen={diagnosticsModalOpen}
+        onClose={() => setDiagnosticsModalOpen(false)}
+      />
+
+      {/* Floating Notification Center */}
+      <FloatingNotificationCenter />
     </div>
   );
 }

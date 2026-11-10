@@ -57,6 +57,8 @@ interface CommandPaletteProps {
   onOpenBrandModal: () => void;
   onOpenSettings: () => void;
   onInstallPWA?: () => void;
+  onOpenAnalytics?: () => void;
+  onOpenDiagnostics?: () => void;
 }
 
 interface CommandItem {

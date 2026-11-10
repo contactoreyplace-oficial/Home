@@ -274,6 +274,7 @@ export interface AppGlobalConfig {
     enable3DCursor: boolean;
     highContrast: boolean;
     enableDataSurge: boolean;
+    batterySaver: boolean;
   };
   widgets: {
     showTelemetry: boolean;
@@ -432,7 +433,8 @@ export const DEFAULT_APP_CONFIG: AppGlobalConfig = {
     enableChromaticAberration: true,
     bloomStrength: 1.2,
     enable3DCursor: true,
-    highContrast: false
+    highContrast: false,
+    batterySaver: false
   },
   widgets: {
     showTelemetry: false,

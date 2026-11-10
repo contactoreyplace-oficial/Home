@@ -176,3 +176,17 @@
   animation: shakeImpact 0.36s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
+@keyframes uiGlitch {
+  0% { transform: translate(0); filter: none; }
+  20% { transform: translate(-3px, 2px); filter: hue-rotate(90deg) contrast(1.4); }
+  40% { transform: translate(3px, -2px); filter: invert(0.15) saturate(2); }
+  60% { transform: translate(-2px, -1px); filter: none; }
+  80% { transform: translate(2px, 1px); filter: hue-rotate(-45deg); }
+  100% { transform: translate(0); filter: none; }
+}
+
+.ui-glitch-active {
+  animation: uiGlitch 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+

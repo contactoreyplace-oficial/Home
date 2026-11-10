@@ -22,6 +22,7 @@ interface Planet3DProps {
   onSelectBeacon?: (index: number) => void;
   viewMode?: ViewMode;
   cinematicMode?: boolean;
+  batterySaver?: boolean;
 }
 
 // Global Texture Cache by Theme & LOD to prevent repeated computations
@@ -327,13 +328,17 @@ export const Planet3D: React.FC<Planet3DProps> = ({
   onRotate,
   onSelectBeacon,
   viewMode = 'orbit',
-  cinematicMode = false
+  cinematicMode = false,
+  batterySaver = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [deviceCaps] = useState<Device3DCapabilities>(() => detectDeviceCapabilities());
 
   const cinematicRef = useRef(cinematicMode);
   cinematicRef.current = cinematicMode;
+
+  const batterySaverRef = useRef(batterySaver);
+  batterySaverRef.current = batterySaver;
 
   const orbitAngleRef = useRef(orbitAngle);
   orbitAngleRef.current = orbitAngle;
@@ -849,8 +854,17 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     let animId: number;
     let lastTime = performance.now();
     let frameTimes: number[] = [];
+    let skipFrame = false;
 
     const animate = (time: number) => {
+      if (batterySaverRef.current) {
+        skipFrame = !skipFrame;
+        if (skipFrame) {
+          animId = requestAnimationFrame(animate);
+          return;
+        }
+      }
+
       const delta = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
