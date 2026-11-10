@@ -36,9 +36,15 @@ import {
   Eye,
   FileCode,
   Move,
-  Lock
+  Lock,
+  CloudSun,
+  Smartphone,
+  Vibrate,
+  ShieldCheck
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
+import { tacticalFeedback } from '../utils/tacticalFeedback';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -124,6 +130,16 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
       ...config,
       design: {
         ...config.design,
+        [field]: value
+      }
+    });
+  };
+
+  const handleUpdateWeather = (field: keyof AppGlobalConfig['weather'], value: unknown) => {
+    onUpdateConfig({
+      ...config,
+      weather: {
+        ...(config.weather || { mode: 'aurora', intensity: 1.0 }),
         [field]: value
       }
     });
@@ -1136,6 +1152,136 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   className="w-5 h-5 accent-[#00f0ff]"
                 />
               </label>
+            </div>
+
+            {/* Weather Overlay Controls */}
+            <div className="p-3.5 rounded-2xl bg-[#06151c] border border-[#315258] space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-mono text-xs text-white font-bold block flex items-center gap-1.5">
+                    <CloudSun className="w-4 h-4 text-[#00f0ff]" />
+                    Efectos Atmosféricos (WeatherOverlay)
+                  </span>
+                  <span className="text-[10px] text-[#a8cbc7]">
+                    Partículas y auroras sincronizadas con el Modo Zen
+                  </span>
+                </div>
+              </div>
+
+              {/* Mode Buttons */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+                {(
+                  [
+                    { id: 'aurora', label: 'Aurora Boreal' },
+                    { id: 'stardust', label: 'Polvo Estelar' },
+                    { id: 'solar-wisps', label: 'Wisps Solares' },
+                    { id: 'off', label: 'Desactivado' }
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => handleUpdateWeather('mode', m.id)}
+                    className={`py-1.5 px-2 rounded-xl font-mono text-[11px] border transition-all ${
+                      (config.weather?.mode || 'aurora') === m.id
+                        ? 'border-[#00f0ff] bg-[#00f0ff]/20 text-white font-bold shadow-[0_0_12px_rgba(0,240,255,0.3)]'
+                        : 'border-[#315258] bg-[#071922] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {(config.weather?.mode || 'aurora') !== 'off' && (
+                <div className="pt-2 border-t border-white/5">
+                  <div className="flex justify-between font-mono text-[10px] mb-1">
+                    <span className="text-[#a9e7df]">Intensidad de Partículas</span>
+                    <span className="text-[#00f0ff] font-bold">{(config.weather?.intensity || 1.0).toFixed(1)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="2.0"
+                    step="0.1"
+                    value={config.weather?.intensity || 1.0}
+                    onChange={(e) => handleUpdateWeather('intensity', parseFloat(e.target.value))}
+                    className="w-full accent-[#00f0ff]"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Tactical Feedback & Browser Vibration Controls */}
+            <div className="p-3.5 rounded-2xl bg-[#06151c] border border-[#315258] space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-mono text-xs text-white font-bold block flex items-center gap-1.5">
+                    <Vibrate className="w-4 h-4 text-emerald-400" />
+                    Respuesta Táctica & Vibración Háptica
+                  </span>
+                  <span className="text-[10px] text-[#a8cbc7]">
+                    Feedback háptico en móviles y retroceso táctico de pantalla
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-[11px] text-gray-300">Vibración Háptica en Móvil (Browser API)</span>
+                  <input
+                    type="checkbox"
+                    defaultChecked={tacticalFeedback.isHapticsEnabled()}
+                    onChange={(e) => tacticalFeedback.setHapticsEnabled(e.target.checked)}
+                    className="w-4 h-4 accent-[#10b981]"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-[11px] text-gray-300">Micro-retroceso / Temblor sutil de pantalla</span>
+                  <input
+                    type="checkbox"
+                    defaultChecked={tacticalFeedback.isShakeEnabled()}
+                    onChange={(e) => tacticalFeedback.setShakeEnabled(e.target.checked)}
+                    className="w-4 h-4 accent-[#10b981]"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  tacticalFeedback.trigger('launch', 'impact');
+                  setSuccessMsg('¡Pulso táctico ejecutado con éxito!');
+                  setTimeout(() => setSuccessMsg(''), 2000);
+                }}
+                className="w-full mt-1 py-1.5 px-3 rounded-xl apple-button text-[11px] font-mono text-[#00f0ff] hover:text-white"
+              >
+                Probar Respuesta Táctica y Háptica
+              </button>
+            </div>
+
+            {/* Super PWA & Offline Engine */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#0c2635] to-[#04121a] border border-[#00f0ff]/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-[#00f0ff]/20 text-[#00f0ff]">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-mono text-xs text-white font-bold block">
+                      Super Progressive Web App (PWA)
+                    </span>
+                    <span className="text-[10px] text-[#8ddcd1]">
+                      Soporte de caché offline y motor instalable
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
+                Esta aplicación está configurada con Service Workers activos para precachear el entorno 3D, mapas vectoriales, audio y recursos en tu dispositivo.
+              </p>
+              <PWAInstallButton variant="full" className="w-full justify-center" />
             </div>
           </div>
         )}

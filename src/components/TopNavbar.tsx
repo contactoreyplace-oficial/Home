@@ -1,7 +1,9 @@
 import React from 'react';
-import { Orbit, Settings, Sparkles, Move, Lock, Layers, EyeOff, Eye } from 'lucide-react';
+import { Orbit, Settings, Sparkles, Move, Lock, Layers, EyeOff, Eye, Search, Command, Film, Globe } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { BrandLogo } from './BrandLogo';
+import { PWAInstallButton } from './PWAInstallButton';
+import { tacticalFeedback } from '../utils/tacticalFeedback';
 
 interface TopNavbarProps {
   onOpenSettings: () => void;
@@ -18,6 +20,9 @@ interface TopNavbarProps {
   onResetWidgetPositions?: () => void;
   zenMode?: boolean;
   onToggleZenMode?: () => void;
+  onOpenCommandPalette?: () => void;
+  cinematicMode?: boolean;
+  onToggleCinematicMode?: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -34,7 +39,10 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onToggleDraggableWidgets,
   onResetWidgetPositions,
   zenMode = false,
-  onToggleZenMode
+  onToggleZenMode,
+  onOpenCommandPalette,
+  cinematicMode = true,
+  onToggleCinematicMode
 }) => {
   return (
     <header className="relative z-30 flex flex-wrap items-center justify-between gap-3 px-4 sm:px-8 py-2.5 sm:py-3.5 pointer-events-auto border-b border-[#71c4bd]/10 bg-[#030d14]/60 backdrop-blur-md">
@@ -69,6 +77,60 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
       {/* Top right quick actions */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Command Palette Quick Search Button */}
+        {onOpenCommandPalette && (
+          <button
+            type="button"
+            onClick={() => {
+              tacticalFeedback.trigger('light', 'subtle');
+              onOpenCommandPalette();
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[#00f0ff]/30 bg-[#0c2a33]/80 hover:bg-[#123e4b] text-[#edfffb] font-mono text-xs transition-all shadow-sm hover:border-[#00f0ff]/70 hover:shadow-[0_0_15px_rgba(0,240,255,0.25)]"
+            title="Abrir Command Palette (Ctrl+K o Cmd+K)"
+          >
+            <Search className="w-3.5 h-3.5 text-[#00f0ff]" />
+            <span className="hidden md:inline text-xs text-gray-300">Buscar...</span>
+            <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/10 text-[10px] text-gray-300 border border-white/10">
+              <Command className="w-2.5 h-2.5" /> K
+            </kbd>
+          </button>
+        )}
+
+        {/* Cinematic Video vs 3D Interactive Planet Mode */}
+        {onToggleCinematicMode && (
+          <button
+            type="button"
+            onClick={() => {
+              soundManager.playSelect();
+              tacticalFeedback.trigger('medium', 'subtle');
+              onToggleCinematicMode();
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-xs transition-all shadow-md border ${
+              cinematicMode
+                ? 'bg-[#00f0ff] text-black font-extrabold border-[#00f0ff] shadow-[0_0_15px_rgba(0,240,255,0.5)]'
+                : 'bg-[#071d27]/90 text-[#a5e6df] border-[#71c4bd]/40 hover:text-white hover:border-[#00f0ff]/60'
+            }`}
+            title="Cambiar entre Video Cinemático 4K y 3D Interactivo"
+          >
+            {cinematicMode ? (
+              <>
+                <Film className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Modo Video</span>
+                <span className="sm:hidden">Video</span>
+              </>
+            ) : (
+              <>
+                <Globe className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Modo 3D</span>
+                <span className="sm:hidden">3D</span>
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Super PWA Install Button */}
+        <PWAInstallButton />
+
         {/* Zen Mode / Ocultar Widgets Toggle */}
         {onToggleZenMode && (
           <button

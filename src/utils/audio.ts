@@ -188,15 +188,63 @@ class SoundSynthesizer {
     } catch {}
   }
 
+  private isZenSoundscape: boolean = false;
+
+  public setZenModeSoundscape(isZen: boolean) {
+    this.isZenSoundscape = isZen;
+    if (this.isMuted) return;
+
+    if (!this.soundscapeRunning && this.musicMode === 'soundscape') {
+      this.startSoundscape(this.currentTheme);
+    }
+
+    if (!this.ctx || !this.soundscapeOsc1 || !this.soundscapeOsc2 || !this.soundscapeFilter) return;
+    const now = this.ctx.currentTime;
+
+    if (isZen) {
+      // Shift to 'deep space vacuum': subterranean sub-bass frequencies & quiet immense cosmic void
+      this.soundscapeOsc1.type = 'sine';
+      this.soundscapeOsc2.type = 'sine';
+      this.soundscapeOsc1.frequency.setTargetAtTime(36.7, now, 1.2);
+      this.soundscapeOsc2.frequency.setTargetAtTime(55.0, now, 1.2);
+      this.soundscapeFilter.frequency.setTargetAtTime(72, now, 1.4);
+      this.soundscapeFilter.Q.setTargetAtTime(4.2, now, 1.2);
+
+      if (this.soundscapeGain) {
+        this.soundscapeGain.gain.setTargetAtTime(Math.min(0.42, this.soundscapeVolume * 1.15), now, 1.0);
+      }
+    } else {
+      // Shift to 'nebula hum': luminous celestial harmonic overtone & ethereal living planetary resonance
+      this.soundscapeOsc1.type = 'triangle';
+      this.soundscapeOsc2.type = 'sine';
+      this.soundscapeOsc1.frequency.setTargetAtTime(110.0, now, 1.0);
+      this.soundscapeOsc2.frequency.setTargetAtTime(164.81, now, 1.0);
+      this.soundscapeFilter.frequency.setTargetAtTime(260, now, 1.0);
+      this.soundscapeFilter.Q.setTargetAtTime(2.2, now, 1.0);
+
+      if (this.soundscapeGain) {
+        this.soundscapeGain.gain.setTargetAtTime(this.soundscapeVolume, now, 1.0);
+      }
+    }
+  }
+
+  public getZenModeSoundscape(): boolean {
+    return this.isZenSoundscape;
+  }
+
   public updateTheme(theme: PlanetTheme) {
     this.currentTheme = theme;
-    if (this.soundscapeRunning && this.ctx) {
+    if (this.soundscapeRunning && this.ctx && !this.isZenSoundscape) {
       this.applyThemeFrequencies(theme);
     }
   }
 
   private applyThemeFrequencies(theme: PlanetTheme) {
     if (!this.ctx || !this.soundscapeOsc1 || !this.soundscapeOsc2 || !this.soundscapeFilter) return;
+    if (this.isZenSoundscape) {
+      this.setZenModeSoundscape(true);
+      return;
+    }
     const now = this.ctx.currentTime;
 
     switch (theme) {

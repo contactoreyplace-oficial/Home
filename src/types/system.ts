@@ -1,5 +1,76 @@
 export type SystemCategory = 'Core' | 'AI & Data' | 'Infraestructura' | 'Seguridad' | 'Operaciones' | 'Negocio';
 
+export interface CategoryTag {
+  id: string;
+  name: string;
+  shortLabel: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  glowColor: string;
+}
+
+export const CATEGORY_TAG_MAP: Record<SystemCategory, CategoryTag> = {
+  'Core': {
+    id: 'core',
+    name: 'Core System',
+    shortLabel: 'CORE',
+    color: '#10b981',
+    bgColor: 'rgba(16, 185, 129, 0.15)',
+    borderColor: 'rgba(16, 185, 129, 0.45)',
+    glowColor: 'rgba(16, 185, 129, 0.3)'
+  },
+  'AI & Data': {
+    id: 'ai-data',
+    name: 'AI & Data',
+    shortLabel: 'AI/DATA',
+    color: '#06b6d4',
+    bgColor: 'rgba(6, 182, 212, 0.15)',
+    borderColor: 'rgba(6, 182, 212, 0.45)',
+    glowColor: 'rgba(6, 182, 212, 0.3)'
+  },
+  'Infraestructura': {
+    id: 'infra',
+    name: 'Infraestructura',
+    shortLabel: 'INFRA',
+    color: '#38bdf8',
+    bgColor: 'rgba(56, 189, 248, 0.15)',
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+    glowColor: 'rgba(56, 189, 248, 0.3)'
+  },
+  'Seguridad': {
+    id: 'security',
+    name: 'Seguridad',
+    shortLabel: 'SEC',
+    color: '#f43f5e',
+    bgColor: 'rgba(244, 63, 94, 0.15)',
+    borderColor: 'rgba(244, 63, 94, 0.45)',
+    glowColor: 'rgba(244, 63, 94, 0.3)'
+  },
+  'Operaciones': {
+    id: 'operations',
+    name: 'Operaciones',
+    shortLabel: 'OPS',
+    color: '#f59e0b',
+    bgColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+    glowColor: 'rgba(245, 158, 11, 0.3)'
+  },
+  'Negocio': {
+    id: 'business',
+    name: 'Negocio',
+    shortLabel: 'BIZ',
+    color: '#ec4899',
+    bgColor: 'rgba(236, 72, 153, 0.15)',
+    borderColor: 'rgba(236, 72, 153, 0.45)',
+    glowColor: 'rgba(236, 72, 153, 0.3)'
+  }
+};
+
+export function getSystemCategoryTag(category: SystemCategory): CategoryTag {
+  return CATEGORY_TAG_MAP[category] || CATEGORY_TAG_MAP['Core'];
+}
+
 export type SystemStatus = 'operational' | 'upgrading' | 'beta' | 'standby';
 
 export type LoadingVideoStyle =
@@ -17,6 +88,7 @@ export interface SystemPortal {
   name: string;
   tagline: string;
   category: SystemCategory;
+  categoryTag?: CategoryTag;
   url: string;
   description: string;
   status: SystemStatus;
@@ -235,6 +307,10 @@ export interface AppGlobalConfig {
     spatialPanningEnabled: boolean;
     currentTrackIndex: number;
   };
+  weather: {
+    mode: 'aurora' | 'stardust' | 'solar-wisps' | 'off';
+    intensity: number; // 0.2 to 2.0
+  };
 }
 
 export const DEFAULT_NEWS_ITEMS: NewsItem[] = [
@@ -389,6 +465,10 @@ export const DEFAULT_APP_CONFIG: AppGlobalConfig = {
     musicVolume: 0.45,
     spatialPanningEnabled: true,
     currentTrackIndex: 0
+  },
+  weather: {
+    mode: 'aurora',
+    intensity: 1.0
   }
 };
 
@@ -399,6 +479,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Reyplace Core',
     tagline: 'Centro neurálgico del ecosistema',
     category: 'Core',
+    categoryTag: CATEGORY_TAG_MAP['Core'],
     url: 'https://reyplace.com',
     description: 'Plataforma central unificada para administración de identidades, permisos corporativos y control maestro de aplicaciones.',
     status: 'operational',
@@ -416,6 +497,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'AI Neural Studio',
     tagline: 'Inteligencia artificial generativa',
     category: 'AI & Data',
+    categoryTag: CATEGORY_TAG_MAP['AI & Data'],
     url: 'https://gemini.google.com',
     description: 'Ambiente interactivo para experimentación con modelos multimodales, embeddings vectoriales y procesamiento cognitivo.',
     status: 'operational',
@@ -433,6 +515,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Cloud Mesh Fabric',
     tagline: 'Infraestructura elástica global',
     category: 'Infraestructura',
+    categoryTag: CATEGORY_TAG_MAP['Infraestructura'],
     url: 'https://cloud.google.com',
     description: 'Orquestación de microservicios con escalado automático, balanceo de carga geo-distribuido y redes de baja latencia.',
     status: 'operational',
@@ -450,6 +533,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Quantum Analytics',
     tagline: 'Minería y telemetría en tiempo real',
     category: 'AI & Data',
+    categoryTag: CATEGORY_TAG_MAP['AI & Data'],
     url: 'https://analytics.google.com',
     description: 'Procesamiento masivo de flujos de datos en tiempo real, tableros predictivos y análisis de comportamiento de usuarios.',
     status: 'operational',
@@ -467,6 +551,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Security Sentinel',
     tagline: 'Monitoreo Zero-Trust & WAF',
     category: 'Seguridad',
+    categoryTag: CATEGORY_TAG_MAP['Seguridad'],
     url: 'https://security.google.com',
     description: 'Escudo perimetral autónomo con detección de anomalías, protección criptográfica y auditoría continua de cumplimiento.',
     status: 'operational',
@@ -484,6 +569,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'DevOps Continuum',
     tagline: 'Integración y despliegue veloz',
     category: 'Operaciones',
+    categoryTag: CATEGORY_TAG_MAP['Operaciones'],
     url: 'https://github.com',
     description: 'Tuberías automatizadas de CI/CD, pruebas de estrés, verificación de seguridad y despliegues sin tiempo de inactividad.',
     status: 'operational',
@@ -501,6 +587,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Commerce Gateway',
     tagline: 'Pasarela transaccional omnicanal',
     category: 'Negocio',
+    categoryTag: CATEGORY_TAG_MAP['Negocio'],
     url: 'https://stripe.com',
     description: 'Motor de pagos internacionales de alta resiliencia con soporte multidivisa, suscripciones y liquidación instantánea.',
     status: 'operational',
@@ -518,6 +605,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Vector Database Hub',
     tagline: 'Almacenamiento semántico de alta velocidad',
     category: 'AI & Data',
+    categoryTag: CATEGORY_TAG_MAP['AI & Data'],
     url: 'https://firebase.google.com',
     description: 'Base de datos documental y vectorial optimizada para búsquedas semánticas, grafos de conocimiento y caché distribuida.',
     status: 'upgrading',
@@ -535,6 +623,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Customer Experience',
     tagline: 'CRM & Relaciones omnicanal',
     category: 'Negocio',
+    categoryTag: CATEGORY_TAG_MAP['Negocio'],
     url: 'https://hubspot.com',
     description: 'Gestión 360° del ciclo de vida del cliente, automatización de mensajería, soporte multicanal y fidelización.',
     status: 'operational',
@@ -552,6 +641,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Observability Horizon',
     tagline: 'Rastreo y monitoreo APM 24/7',
     category: 'Operaciones',
+    categoryTag: CATEGORY_TAG_MAP['Operaciones'],
     url: 'https://datadoghq.com',
     description: 'Visibilidad total con telemetría unificada de trazas distribuidas, métricas en vivo, registros y alertas proactivas.',
     status: 'operational',
@@ -569,6 +659,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'API Nexus Gateway',
     tagline: 'Punto de integración para desarrolladores',
     category: 'Infraestructura',
+    categoryTag: CATEGORY_TAG_MAP['Infraestructura'],
     url: 'https://postman.com',
     description: 'Gobierno y gestión centralizada de APIs REST, GraphQL y gRPC con límite de peticiones, caché e instrumentación.',
     status: 'operational',
@@ -586,6 +677,7 @@ export const DEFAULT_SYSTEMS: SystemPortal[] = [
     name: 'Workspace Collab',
     tagline: 'Espacio colaborativo de diseño y producto',
     category: 'Negocio',
+    categoryTag: CATEGORY_TAG_MAP['Negocio'],
     url: 'https://figma.com',
     description: 'Co-creación en tiempo real para especificaciones de diseño, prototipado UI/UX interactivo y documentación de sistemas.',
     status: 'operational',

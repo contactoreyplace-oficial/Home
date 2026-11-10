@@ -25,6 +25,32 @@ export const LocalTelemetry: React.FC<LocalTelemetryProps> = ({
   // Default minimized so it doesn't obstruct the viewport
   const [isMinimized, setIsMinimized] = useState<boolean>(true);
 
+  // Progressive 3D Streaming Telemetry State
+  const [streamInfo, setStreamInfo] = useState<{
+    stage: string;
+    progress: number;
+    activeLOD: string;
+    fps: number;
+    triangles: number;
+  }>({
+    stage: 'full_fidelity',
+    progress: 100,
+    activeLOD: 'LOD_HIGH',
+    fps: 60,
+    triangles: 8192
+  });
+
+  useEffect(() => {
+    const handleProgress = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (custom.detail) {
+        setStreamInfo(custom.detail);
+      }
+    };
+    window.addEventListener('reyplace-3d-stream-progress', handleProgress);
+    return () => window.removeEventListener('reyplace-3d-stream-progress', handleProgress);
+  }, []);
+
   // Time & Date formatters
   useEffect(() => {
     const dateFormatter = new Intl.DateTimeFormat('es-ES', {
@@ -269,6 +295,12 @@ export const LocalTelemetry: React.FC<LocalTelemetryProps> = ({
           <div className="flex justify-between items-center">
             <span>Sistemas Activos:</span>
             <span className="text-[#76fbe5]">12 / 12 Operacionales</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span>Motor 3D Streaming:</span>
+            <span className="text-[#00f0ff] font-bold">
+              {streamInfo.progress === 100 ? 'Sincronizado' : `${streamInfo.progress}%`} · {streamInfo.activeLOD} ({streamInfo.triangles} Δ)
+            </span>
           </div>
         </div>
       )}

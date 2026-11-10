@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SystemPortal } from '../types/system';
+import { SystemPortal, getSystemCategoryTag } from '../types/system';
 import { SystemIcon } from './SystemIcon';
 import {
   X,
@@ -95,9 +95,28 @@ export const SystemModal: React.FC<SystemModalProps> = ({
                 <SystemIcon name={system.icon} className="w-6 h-6" />
               </div>
               <div>
-                <span className="font-mono text-[10px] text-[#8eddd3] uppercase tracking-widest block">
-                  SISTEMA ORBITAL #{String(system.index).padStart(2, '0')}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-[#8eddd3] uppercase tracking-widest block">
+                    SISTEMA ORBITAL #{String(system.index).padStart(2, '0')}
+                  </span>
+                  {(() => {
+                    const tag = system.categoryTag || getSystemCategoryTag(system.category);
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono text-[8px] font-bold tracking-wider uppercase border"
+                        style={{
+                          backgroundColor: tag.bgColor,
+                          color: tag.color,
+                          borderColor: tag.borderColor,
+                          boxShadow: `0 0 10px ${tag.glowColor}`
+                        }}
+                      >
+                        <span className="w-1 h-1 rounded-full animate-pulse" style={{ backgroundColor: tag.color }} />
+                        <span>{tag.shortLabel}</span>
+                      </span>
+                    );
+                  })()}
+                </div>
                 <h2 id="modal-system-title" className="text-xl font-bold text-white">
                   {system.name}
                 </h2>

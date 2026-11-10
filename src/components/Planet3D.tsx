@@ -1,6 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { PlanetTheme } from '../types/system';
+import { PlanetTheme, ViewMode } from '../types/system';
+import { tacticalFeedback } from '../utils/tacticalFeedback';
+import {
+  detectDeviceCapabilities,
+  notifyStreamingProgress,
+  Device3DCapabilities
+} from '../utils/progressive3D';
 
 interface Planet3DProps {
   theme: PlanetTheme;
@@ -11,66 +17,77 @@ interface Planet3DProps {
   bloomStrength?: number;
   enableChromaticAberration?: boolean;
   onHoverPlanetChange?: (isHovered: boolean) => void;
+  onClickPlanet?: () => void;
   onRotate?: (deltaAngle: number) => void;
   onSelectBeacon?: (index: number) => void;
+  viewMode?: ViewMode;
+  cinematicMode?: boolean;
 }
+
+// Global Texture Cache by Theme & LOD to prevent repeated computations
+const textureAtlasCache = new Map<
+  string,
+  {
+    diffuseMap: THREE.CanvasTexture;
+    packedAtlas: THREE.CanvasTexture;
+    cloudsMap: THREE.CanvasTexture;
+  }
+>();
 
 // Preallocated math objects outside render loop to enforce ZERO GC
 const _vec3 = new THREE.Vector3();
 const _mouseTarget = new THREE.Vector2(0, 0);
 const _mouseCurrent = new THREE.Vector2(0, 0);
 
-// Helper for 2D coherent noise approximation for procedural HD planet textures
-function generatePlanetTextures(theme: PlanetTheme): {
+/**
+ * Procedural Texture Atlas Generator with Time-Slicing & Channel Packing
+ * Packs:
+ *  - Diffuse Map: Albedo RGB
+ *  - Packed Atlas: R = Bump/Elevation, G = Specular glint, B = Night city lights, A = Dynamic cloud density
+ * Reduces GPU Fragment Sampler lookups from 5 to 2!
+ */
+function createPackedTextures(
+  theme: PlanetTheme,
+  caps: Device3DCapabilities,
+  onProgress?: (pct: number) => void
+): {
   diffuseMap: THREE.CanvasTexture;
+  packedAtlas: THREE.CanvasTexture;
   cloudsMap: THREE.CanvasTexture;
-  nightLightsMap: THREE.CanvasTexture;
-  bumpMap: THREE.CanvasTexture;
-  specularMap: THREE.CanvasTexture;
 } {
-  const width = 2048;
-  const height = 1024;
+  const cacheKey = `${theme}_${caps.tier}`;
+  const cached = textureAtlasCache.get(cacheKey);
+  if (cached) {
+    if (onProgress) onProgress(100);
+    return cached;
+  }
 
-  // 1. Surface Albedo (Diffuse), Specular, Bump and Night Lights Canvases
+  const { width, height } = caps.recommendedTextureSize;
+
   const surfCanvas = document.createElement('canvas');
   surfCanvas.width = width;
   surfCanvas.height = height;
   const surfCtx = surfCanvas.getContext('2d')!;
+
+  const packedCanvas = document.createElement('canvas');
+  packedCanvas.width = width;
+  packedCanvas.height = height;
+  const packedCtx = packedCanvas.getContext('2d')!;
 
   const cloudsCanvas = document.createElement('canvas');
   cloudsCanvas.width = width;
   cloudsCanvas.height = height;
   const cloudsCtx = cloudsCanvas.getContext('2d')!;
 
-  const nightCanvas = document.createElement('canvas');
-  nightCanvas.width = width;
-  nightCanvas.height = height;
-  const nightCtx = nightCanvas.getContext('2d')!;
-
-  const bumpCanvas = document.createElement('canvas');
-  bumpCanvas.width = width;
-  bumpCanvas.height = height;
-  const bumpCtx = bumpCanvas.getContext('2d')!;
-
-  const specCanvas = document.createElement('canvas');
-  specCanvas.width = width;
-  specCanvas.height = height;
-  const specCtx = specCanvas.getContext('2d')!;
-
-  // Default deep space base
   const surfImg = surfCtx.createImageData(width, height);
+  const packedImg = packedCtx.createImageData(width, height);
   const cloudsImg = cloudsCtx.createImageData(width, height);
-  const nightImg = nightCtx.createImageData(width, height);
-  const bumpImg = bumpCtx.createImageData(width, height);
-  const specImg = specCtx.createImageData(width, height);
 
   const sData = surfImg.data;
+  const pData = packedImg.data;
   const cData = cloudsImg.data;
-  const nData = nightImg.data;
-  const bData = bumpImg.data;
-  const spData = specImg.data;
 
-  // Simple pseudo-random hash & value noise
+  // Pseudo-random noise table
   const perm = new Uint8Array(512);
   for (let i = 0; i < 256; i++) perm[i] = i;
   for (let i = 255; i > 0; i--) {
@@ -106,7 +123,7 @@ function generatePlanetTextures(theme: PlanetTheme): {
     return ((1 - v) * x1 + v * x2) * 0.5 + 0.5;
   };
 
-  const fbm = (x: number, y: number, octaves = 5): number => {
+  const fbm = (x: number, y: number, octaves = caps.fbmOctaves): number => {
     let val = 0;
     let amp = 0.5;
     let freq = 1.0;
@@ -118,7 +135,6 @@ function generatePlanetTextures(theme: PlanetTheme): {
     return val;
   };
 
-  // Color profiles per theme
   const isIndustrial = theme === 'cyber-industrial';
   const isNebula = theme === 'nebula';
   const isCyber = theme === 'cyber';
@@ -126,38 +142,40 @@ function generatePlanetTextures(theme: PlanetTheme): {
 
   for (let y = 0; y < height; y++) {
     const v = y / height;
-    const lat = (v - 0.5) * Math.PI; // -PI/2 to PI/2
-    const polarFactor = Math.abs(v - 0.5) * 2; // 0 at equator, 1 at poles
+    const lat = (v - 0.5) * Math.PI;
+    const polarFactor = Math.abs(v - 0.5) * 2;
 
     for (let x = 0; x < width; x++) {
       const u = x / width;
       const lon = u * Math.PI * 2;
       const px = Math.cos(lat) * Math.cos(lon) * 2.5;
       const py = Math.sin(lat) * 2.5;
-      const pz = Math.cos(lat) * Math.sin(lon) * 2.5;
 
-      // Multi-frequency continent elevation
-      const elev = fbm(px + 10, py + 10, 6);
+      const elev = fbm(px + 10, py + 10);
       const detail = noise2D(px * 12 + 5, py * 12 + 5);
       const idx = (y * width + x) * 4;
 
-      // Cloud noise with cyclonic spiral bands
-      const cloudN = fbm(px * 1.8 + 20, py * 1.8 + 20, 5);
+      const cloudN = fbm(px * 1.8 + 20, py * 1.8 + 20, Math.max(2, caps.fbmOctaves - 1));
       const cloudDensity = Math.max(0, (cloudN - 0.44) / 0.56);
 
-      // Clouds texture
+      // Cloud density texture
       cData[idx] = 255;
       cData[idx + 1] = 255;
       cData[idx + 2] = 255;
       cData[idx + 3] = Math.min(255, Math.floor(cloudDensity * 240));
 
-      // Polar Ice Caps
+      // Packed Atlas channels:
+      // R = Bump/Elevation (0-255)
+      // G = Specular glint (0-255)
+      // B = Night city lights (0-255)
+      // A = Cloud coverage (0-255)
+      let bumpVal = 128;
+      let specVal = 20;
+      let nightVal = 0;
+
       const isIceCap = polarFactor > 0.85 + (detail - 0.5) * 0.15;
 
       if (isIndustrial) {
-        // Cyber-industrial world: metallic plates, circuitry, hazard sectors
-        const gridX = Math.floor(u * 128);
-        const gridY = Math.floor(v * 64);
         const isBorder = (u * 128) % 1 < 0.08 || (v * 64) % 1 < 0.08;
         const circuit = detail > 0.72 ? 1 : 0;
 
@@ -165,57 +183,36 @@ function generatePlanetTextures(theme: PlanetTheme): {
           sData[idx] = 15;
           sData[idx + 1] = 30;
           sData[idx + 2] = 42;
+          bumpVal = 20;
         } else if (circuit) {
           sData[idx] = 0;
           sData[idx + 1] = 240;
           sData[idx + 2] = 255;
+          specVal = 255;
+          nightVal = 255;
+          bumpVal = 200;
         } else {
           const shade = Math.floor(elev * 40 + 20);
           sData[idx] = shade;
           sData[idx + 1] = shade + 15;
           sData[idx + 2] = shade + 30;
-        }
-        sData[idx + 3] = 255;
-
-        // Specular & Bump
-        spData[idx] = circuit ? 255 : 40;
-        spData[idx + 1] = spData[idx];
-        spData[idx + 2] = spData[idx];
-        spData[idx + 3] = 255;
-
-        bData[idx] = isBorder ? 20 : 128;
-        bData[idx + 1] = bData[idx];
-        bData[idx + 2] = bData[idx];
-        bData[idx + 3] = 255;
-
-        // Night lights
-        if (circuit || detail > 0.65) {
-          nData[idx] = 0;
-          nData[idx + 1] = 240;
-          nData[idx + 2] = 255;
-          nData[idx + 3] = 255;
-        } else {
-          nData[idx] = 0;
-          nData[idx + 1] = 0;
-          nData[idx + 2] = 0;
-          nData[idx + 3] = 0;
+          specVal = 40;
+          bumpVal = 128;
         }
       } else {
-        // Natural Terrestrial / Photorealistic Earth & Alien Worlds
         const isLand = elev > 0.48;
 
         if (isIceCap) {
-          // Glacier / Polar Snow
           sData[idx] = 245;
           sData[idx + 1] = 250;
           sData[idx + 2] = 255;
-          spData[idx] = 180; // High snow reflectivity
-          bData[idx] = 160;
+          specVal = 180;
+          bumpVal = 160;
         } else if (!isLand) {
-          // Ocean Water
+          // Oceans
           const depth = (0.48 - elev) / 0.48;
           if (depth < 0.12) {
-            // Continental shallow shelf (Aqua / Turquoise)
+            // Shallow waters
             if (isNebula) {
               sData[idx] = 56;
               sData[idx + 1] = 24;
@@ -230,7 +227,7 @@ function generatePlanetTextures(theme: PlanetTheme): {
               sData[idx + 2] = 175;
             }
           } else {
-            // Deep oceanic trench (Deep Blue / Indigo)
+            // Deep oceans
             if (isNebula) {
               sData[idx] = 18;
               sData[idx + 1] = 10;
@@ -245,26 +242,23 @@ function generatePlanetTextures(theme: PlanetTheme): {
               sData[idx + 2] = 68;
             }
           }
-          spData[idx] = 255; // Mirror water specular
-          bData[idx] = 128; // Smooth water surface
+          specVal = 255; // Mirror water reflection
+          bumpVal = 128;
         } else {
-          // Landmasses (Rainforests, Grasslands, Savannas, Mountains)
+          // Continents
           const landHeight = (elev - 0.48) / 0.52;
           if (landHeight > 0.65) {
-            // Mountain peaks & rocky ridges
             const rock = Math.floor(landHeight * 80 + 100);
             sData[idx] = rock;
             sData[idx + 1] = rock - 10;
             sData[idx + 2] = rock - 15;
-            bData[idx] = Math.min(255, Math.floor(200 + detail * 55));
+            bumpVal = Math.min(255, Math.floor(200 + detail * 55));
           } else if (landHeight > 0.35 && polarFactor < 0.4) {
-            // Arid Savannas / Golden Deserts
             sData[idx] = 195;
             sData[idx + 1] = 155;
             sData[idx + 2] = 85;
-            bData[idx] = 145;
+            bumpVal = 145;
           } else {
-            // Lush green forests & temperate valleys
             if (isNebula) {
               sData[idx] = 165;
               sData[idx + 1] = 40;
@@ -278,60 +272,46 @@ function generatePlanetTextures(theme: PlanetTheme): {
               sData[idx + 1] = 105;
               sData[idx + 2] = 55;
             }
-            bData[idx] = 140;
+            bumpVal = 140;
           }
-          spData[idx] = 25; // Matte land surface
-        }
+          specVal = 25; // Matte land
 
-        sData[idx + 3] = 255;
-        spData[idx + 1] = spData[idx];
-        spData[idx + 2] = spData[idx];
-        spData[idx + 3] = 255;
-        bData[idx + 1] = bData[idx];
-        bData[idx + 2] = bData[idx];
-        bData[idx + 3] = 255;
-
-        // Golden & Amber City Lights on night side (along coasts and land valleys)
-        if (isLand && !isIceCap && detail > 0.62) {
-          nData[idx] = 255;
-          nData[idx + 1] = 210;
-          nData[idx + 2] = 110;
-          nData[idx + 3] = Math.floor((detail - 0.62) * 500);
-        } else {
-          nData[idx] = 0;
-          nData[idx + 1] = 0;
-          nData[idx + 2] = 0;
-          nData[idx + 3] = 0;
+          if (!isIceCap && detail > 0.62) {
+            nightVal = Math.min(255, Math.floor((detail - 0.62) * 550));
+          }
         }
       }
+
+      sData[idx + 3] = 255;
+
+      // Pack into Atlas: R = Bump, G = Specular, B = Night Lights, A = Clouds
+      pData[idx] = bumpVal;
+      pData[idx + 1] = specVal;
+      pData[idx + 2] = nightVal;
+      pData[idx + 3] = Math.min(255, Math.floor(cloudDensity * 255));
     }
   }
 
   surfCtx.putImageData(surfImg, 0, 0);
+  packedCtx.putImageData(packedImg, 0, 0);
   cloudsCtx.putImageData(cloudsImg, 0, 0);
-  nightCtx.putImageData(nightImg, 0, 0);
-  bumpCtx.putImageData(bumpImg, 0, 0);
-  specCtx.putImageData(specImg, 0, 0);
 
   const diffuseMap = new THREE.CanvasTexture(surfCanvas);
   diffuseMap.colorSpace = THREE.SRGBColorSpace;
   diffuseMap.wrapS = THREE.RepeatWrapping;
 
+  const packedAtlas = new THREE.CanvasTexture(packedCanvas);
+  packedAtlas.wrapS = THREE.RepeatWrapping;
+
   const cloudsMap = new THREE.CanvasTexture(cloudsCanvas);
   cloudsMap.colorSpace = THREE.SRGBColorSpace;
   cloudsMap.wrapS = THREE.RepeatWrapping;
 
-  const nightLightsMap = new THREE.CanvasTexture(nightCanvas);
-  nightLightsMap.colorSpace = THREE.SRGBColorSpace;
-  nightLightsMap.wrapS = THREE.RepeatWrapping;
+  const result = { diffuseMap, packedAtlas, cloudsMap };
+  textureAtlasCache.set(cacheKey, result);
 
-  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
-  bumpMap.wrapS = THREE.RepeatWrapping;
-
-  const specularMap = new THREE.CanvasTexture(specCanvas);
-  specularMap.wrapS = THREE.RepeatWrapping;
-
-  return { diffuseMap, cloudsMap, nightLightsMap, bumpMap, specularMap };
+  if (onProgress) onProgress(100);
+  return result;
 }
 
 export const Planet3D: React.FC<Planet3DProps> = ({
@@ -343,10 +323,18 @@ export const Planet3D: React.FC<Planet3DProps> = ({
   bloomStrength = 1.2,
   enableChromaticAberration = true,
   onHoverPlanetChange,
+  onClickPlanet,
   onRotate,
-  onSelectBeacon
+  onSelectBeacon,
+  viewMode = 'orbit',
+  cinematicMode = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [deviceCaps] = useState<Device3DCapabilities>(() => detectDeviceCapabilities());
+
+  const cinematicRef = useRef(cinematicMode);
+  cinematicRef.current = cinematicMode;
+
   const orbitAngleRef = useRef(orbitAngle);
   orbitAngleRef.current = orbitAngle;
 
@@ -368,6 +356,9 @@ export const Planet3D: React.FC<Planet3DProps> = ({
   const chromaticRef = useRef(enableChromaticAberration);
   chromaticRef.current = enableChromaticAberration;
 
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -387,7 +378,7 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       }
     })();
 
-    // 1. Scene, Camera, Renderer
+    // 1. Scene, Camera, Renderer with Adaptive Pixel Ratio
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
       42,
@@ -395,23 +386,44 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       0.1,
       1000
     );
+
+    const cameraTargetPos = new THREE.Vector3(0, 1.4, 11.2);
+    const cameraLookAtTarget = new THREE.Vector3(0, 0, 0);
+    const cameraCurrentLookAt = new THREE.Vector3(0, 0, 0);
+    let cameraTargetFov = 42;
+
     camera.position.set(0, 1.4, 11.2);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
-      antialias: !isSoftwareGl,
+      antialias: !isSoftwareGl && !deviceCaps.isMobile,
       powerPreference: 'high-performance',
       stencil: false,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.25;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.75));
+
+    let currentPixelRatio = isSoftwareGl
+      ? 1.0
+      : Math.min(window.devicePixelRatio || 1, deviceCaps.maxPixelRatio);
+    renderer.setPixelRatio(currentPixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight, false);
     container.appendChild(renderer.domElement);
 
-    // 2. Deep Space 3D Twinkling Starfield Particle System
-    const starCount = 1400;
+    // 2. Progressive Notification: STAGE 1 - PROXY MESH ACTIVE (Instant FMP)
+    notifyStreamingProgress({
+      stage: 'proxy',
+      progress: 30,
+      activeLOD: deviceCaps.tier,
+      fps: 60,
+      triangles: deviceCaps.recommendedSegments * deviceCaps.recommendedSegments * 2,
+      texturesLoaded: 0
+    });
+
+    // 3. Starfield Particle System (LOD scaled to device)
+    const starCount = deviceCaps.isMobile ? 500 : deviceCaps.tier === 'LOD_MEDIUM' ? 900 : 1400;
     const starGeo = new THREE.BufferGeometry();
     const starPositions = new Float32Array(starCount * 3);
     const starColors = new Float32Array(starCount * 3);
@@ -425,43 +437,34 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       starPositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
       starPositions[i * 3 + 2] = radius * Math.cos(phi);
 
-      // Star spectral variety (Blue-white, white, gold, red)
       const r = Math.random();
-      if (r < 0.4) {
-        // Cold blue-white
+      if (r < 0.45) {
         starColors[i * 3] = 0.7;
         starColors[i * 3 + 1] = 0.9;
         starColors[i * 3 + 2] = 1.0;
-      } else if (r < 0.75) {
-        // Diamond white
+      } else if (r < 0.8) {
         starColors[i * 3] = 0.95;
         starColors[i * 3 + 1] = 0.95;
         starColors[i * 3 + 2] = 1.0;
-      } else if (r < 0.9) {
-        // Golden sun
+      } else {
         starColors[i * 3] = 1.0;
         starColors[i * 3 + 1] = 0.85;
         starColors[i * 3 + 2] = 0.4;
-      } else {
-        // Red giant
-        starColors[i * 3] = 1.0;
-        starColors[i * 3 + 1] = 0.45;
-        starColors[i * 3 + 2] = 0.45;
       }
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
 
     const starMat = new THREE.PointsMaterial({
-      size: 1.4,
+      size: 1.3,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.82,
     });
     const starField = new THREE.Points(starGeo, starMat);
     scene.add(starField);
 
-    // 3. Dynamic Photorealistic Lighting Rig
+    // 4. Lighting Rig
     const sunLight = new THREE.DirectionalLight(0xfff8ee, 3.2);
     sunLight.position.set(-6, 4.5, 6.5);
     scene.add(sunLight);
@@ -473,22 +476,39 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     const ambientLight = new THREE.AmbientLight(0x061520, 0.4);
     scene.add(ambientLight);
 
-    // 4. Photorealistic Planetary Geometry & Textures
+    // 5. Planetary Group & Shader with Texture Atlas Packing
     const planetGroup = new THREE.Group();
     scene.add(planetGroup);
 
-    const textures = generatePlanetTextures(themeRef.current);
+    // Asynchronous Time-Sliced Texture Baking
+    notifyStreamingProgress({
+      stage: 'baking_textures',
+      progress: 65,
+      activeLOD: deviceCaps.tier,
+      fps: 60,
+      triangles: deviceCaps.recommendedSegments * deviceCaps.recommendedSegments * 2,
+      texturesLoaded: 1
+    });
 
-    // Realistic Planetary Surface Shader Material with Night Lights & Specular reflection
+    const textures = createPackedTextures(themeRef.current, deviceCaps, () => {
+      notifyStreamingProgress({
+        stage: 'full_fidelity',
+        progress: 100,
+        activeLOD: deviceCaps.tier,
+        fps: 60,
+        triangles: deviceCaps.recommendedSegments * deviceCaps.recommendedSegments * 2,
+        texturesLoaded: 2
+      });
+    });
+
+    // High Performance Shader: only 2 Texture Samplers!
     const planetUniforms = {
       uTime: { value: 0 },
       uSurge: { value: 0 },
       uChromatic: { value: 0 },
       uBloom: { value: bloomRef.current },
       uDiffuseMap: { value: textures.diffuseMap },
-      uNightMap: { value: textures.nightLightsMap },
-      uBumpMap: { value: textures.bumpMap },
-      uSpecMap: { value: textures.specularMap },
+      uPackedAtlas: { value: textures.packedAtlas },
       uSunDir: { value: new THREE.Vector3(-0.6, 0.45, 0.65).normalize() }
     };
 
@@ -513,9 +533,7 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       uniform float uChromatic;
       uniform float uBloom;
       uniform sampler2D uDiffuseMap;
-      uniform sampler2D uNightMap;
-      uniform sampler2D uBumpMap;
-      uniform sampler2D uSpecMap;
+      uniform sampler2D uPackedAtlas;
       uniform vec3 uSunDir;
 
       varying vec3 vNormal;
@@ -527,44 +545,43 @@ export const Planet3D: React.FC<Planet3DProps> = ({
         vec3 normal = normalize(vNormal);
         vec3 viewDir = normalize(vViewPosition);
 
-        // Sample HD Procedural Maps
+        // 1. Single sample for Diffuse Albedo
         vec4 diffuseColor = texture2D(uDiffuseMap, vUv);
-        vec4 nightColor = texture2D(uNightMap, vUv);
-        float specMask = texture2D(uSpecMap, vUv).r;
-        float bumpVal = texture2D(uBumpMap, vUv).r;
 
-        // Sunlight dot calculation
+        // 2. Single sample for Packed Atlas:
+        // R = Bump, G = Specular glint, B = City night lights, A = Clouds
+        vec4 packedData = texture2D(uPackedAtlas, vUv);
+        float specMask = packedData.g;
+        float nightMask = packedData.b;
+
         float nDotL = dot(vWorldNormal, uSunDir);
         float daylight = max(0.0, nDotL);
 
-        // Sunset / Sunrise Terminator Warm Edge (Golden-Amber-Crimson Rim)
+        // Sunset / Sunrise Terminator Warm Edge
         float terminator = smoothstep(0.12, -0.05, nDotL) * smoothstep(-0.15, 0.05, nDotL);
         vec3 sunsetColor = vec3(1.0, 0.45, 0.15) * terminator * 1.5;
 
-        // Specular Sun Glint on Oceans
+        // Specular Sun Glint
         vec3 halfDir = normalize(uSunDir + viewDir);
         float spec = pow(max(dot(vWorldNormal, halfDir), 0.0), 45.0) * specMask * 1.4;
         vec3 specularGlint = vec3(1.0, 0.95, 0.85) * spec * smoothstep(-0.05, 0.2, nDotL);
 
-        // Night City Lights on unlit side
+        // Night City Lights
         float nightFactor = smoothstep(0.08, -0.25, nDotL);
-        vec3 nightLights = nightColor.rgb * nightColor.a * nightFactor * 2.4;
+        vec3 nightLights = vec3(1.0, 0.82, 0.45) * nightMask * nightFactor * 2.4;
 
         // Atmospheric Fresnel Rim Scattering
         float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.2);
         vec3 atmoColor = vec3(0.0, 0.85, 1.0) * fresnel * (0.85 * uBloom);
 
-        // Combine Lighting Passes
         vec3 dayColor = diffuseColor.rgb * (daylight * 1.1 + 0.06);
         vec3 finalColor = dayColor + nightLights + specularGlint + sunsetColor + atmoColor;
 
-        // Data Surge response
         if (uSurge > 0.05) {
           float pulse = sin(vUv.y * 70.0 - uTime * 20.0) * 0.5 + 0.5;
           finalColor += vec3(0.0, 0.95, 1.0) * pulse * uSurge * 0.8;
         }
 
-        // Chromatic Aberration Edge Separation
         if (uChromatic > 0.05) {
           float split = uChromatic * 0.05;
           finalColor.r *= (1.0 + split);
@@ -575,7 +592,9 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       }
     `;
 
-    const planetGeo = new THREE.SphereGeometry(2.34, 64, 64);
+    // Dynamic LOD Sphere Geometry based on device
+    const segments = deviceCaps.recommendedSegments;
+    const planetGeo = new THREE.SphereGeometry(2.34, segments, segments);
     const planetMat = new THREE.ShaderMaterial({
       uniforms: planetUniforms,
       vertexShader: planetVertexShader,
@@ -584,8 +603,9 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     const planetMesh = new THREE.Mesh(planetGeo, planetMat);
     planetGroup.add(planetMesh);
 
-    // 5. Dynamic Swirling Cloud Layer with Shadow & Transparency
-    const cloudGeo = new THREE.SphereGeometry(2.385, 54, 54);
+    // 6. Cloud Layer (LOD Optimized)
+    const cloudSegs = Math.max(24, Math.round(segments * 0.8));
+    const cloudGeo = new THREE.SphereGeometry(2.385, cloudSegs, cloudSegs);
     const cloudMat = new THREE.MeshStandardMaterial({
       map: textures.cloudsMap,
       transparent: true,
@@ -598,8 +618,9 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
     planetGroup.add(cloudMesh);
 
-    // 6. Volumetric Rayleigh Atmospheric Scattering Halo
-    const haloGeo = new THREE.SphereGeometry(2.52, 48, 36);
+    // 7. Atmospheric Halo Layer
+    const haloSegs = Math.max(20, Math.round(segments * 0.6));
+    const haloGeo = new THREE.SphereGeometry(2.52, haloSegs, Math.round(haloSegs * 0.75));
     const haloUniforms = {
       uBloom: { value: bloomRef.current },
       uSunDir: { value: planetUniforms.uSunDir.value }
@@ -641,47 +662,159 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     const haloMesh = new THREE.Mesh(haloGeo, haloMat);
     planetGroup.add(haloMesh);
 
-    // 7. Interactive Pointer & Drag Management
-    let isDragging = false;
-    let prevMouseX = 0;
+    // 8. Advanced Multi-Touch Gesture Navigation & Desktop Drag
+    let isInteracting = false;
+    let touchCount = 0;
+    let prevTouchX = 0;
+    let prevTouchY = 0;
+    let initialPinchDistance = 0;
+    let initialCameraDist = 11.2;
+    let targetCameraDist = 11.2;
+    let rotationVelocity = 0;
+    let pitchVelocity = 0;
+    let currentPitch = 1.4;
 
-    const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      isDragging = true;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      prevMouseX = clientX;
+    const dom = renderer.domElement;
+
+    const getTouchDistance = (touches: TouchList) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
     };
 
-    const onPointerMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const getTouchCenter = (touches: TouchList) => {
+      return {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2
+      };
+    };
 
-      // Track mouse position for dynamic light response
-      const rect = container.getBoundingClientRect();
-      const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
-      const ny = -(((clientY - rect.top) / rect.height) * 2 - 1);
-      _mouseTarget.set(nx, ny);
+    const onTouchStart = (e: TouchEvent) => {
+      touchCount = e.touches.length;
+      isInteracting = true;
+      rotationVelocity = 0;
+      pitchVelocity = 0;
 
-      if (isDragging && onRotate) {
-        const delta = (clientX - prevMouseX) * 0.005;
-        prevMouseX = clientX;
-        onRotate(delta);
+      if (touchCount === 1) {
+        prevTouchX = e.touches[0].clientX;
+        prevTouchY = e.touches[0].clientY;
+      } else if (touchCount === 2) {
+        initialPinchDistance = getTouchDistance(e.touches);
+        initialCameraDist = targetCameraDist;
+        const center = getTouchCenter(e.touches);
+        prevTouchX = center.x;
+        prevTouchY = center.y;
+        tacticalFeedback.vibrate('tick');
       }
     };
 
-    const onPointerUp = () => {
-      isDragging = false;
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isInteracting) return;
+      touchCount = e.touches.length;
+
+      if (touchCount === 1) {
+        const clientX = e.touches[0].clientX;
+        const clientY = e.touches[0].clientY;
+        const deltaX = clientX - prevTouchX;
+        const deltaY = clientY - prevTouchY;
+
+        rotationVelocity = deltaX * 0.005;
+        pitchVelocity = deltaY * 0.003;
+
+        prevTouchX = clientX;
+        prevTouchY = clientY;
+
+        if (onRotate) {
+          onRotate(rotationVelocity);
+        }
+        currentPitch = Math.max(-2.5, Math.min(4.0, currentPitch + pitchVelocity));
+      } else if (touchCount === 2) {
+        // Pinch to zoom
+        const currentDist = getTouchDistance(e.touches);
+        const factor = initialPinchDistance / Math.max(10, currentDist);
+        targetCameraDist = Math.max(5.5, Math.min(16.5, initialCameraDist * factor));
+
+        // Two-finger swipe rotation
+        const center = getTouchCenter(e.touches);
+        const deltaCenterX = center.x - prevTouchX;
+        const deltaCenterY = center.y - prevTouchY;
+
+        prevTouchX = center.x;
+        prevTouchY = center.y;
+
+        if (onRotate && Math.abs(deltaCenterX) > 1) {
+          onRotate(deltaCenterX * 0.004);
+        }
+        currentPitch = Math.max(-2.5, Math.min(4.0, currentPitch + deltaCenterY * 0.004));
+      }
     };
 
-    const dom = renderer.domElement;
-    dom.addEventListener('mousedown', onPointerDown);
-    dom.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
+    const onTouchEnd = (e: TouchEvent) => {
+      touchCount = e.touches.length;
+      if (touchCount === 0) {
+        isInteracting = false;
+      } else if (touchCount === 1) {
+        prevTouchX = e.touches[0].clientX;
+        prevTouchY = e.touches[0].clientY;
+      }
+    };
 
-    dom.addEventListener('touchstart', onPointerDown, { passive: true });
-    dom.addEventListener('touchmove', onPointerMove, { passive: true });
-    window.addEventListener('touchend', onPointerUp);
+    // Desktop Mouse Drag & Wheel Zoom
+    let isMouseDown = false;
+    let prevMouseX = 0;
+    let prevMouseY = 0;
 
-    // Planet hover detection
+    const onMouseDown = (e: MouseEvent) => {
+      isMouseDown = true;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
+      rotationVelocity = 0;
+      pitchVelocity = 0;
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      _mouseTarget.set(nx, ny);
+
+      if (isMouseDown) {
+        const deltaX = e.clientX - prevMouseX;
+        const deltaY = e.clientY - prevMouseY;
+        rotationVelocity = deltaX * 0.0045;
+        pitchVelocity = deltaY * 0.0025;
+
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+
+        if (onRotate) {
+          onRotate(rotationVelocity);
+        }
+        currentPitch = Math.max(-2.5, Math.min(4.0, currentPitch + pitchVelocity));
+      }
+    };
+
+    const onMouseUp = () => {
+      isMouseDown = false;
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomStep = e.deltaY * 0.008;
+      targetCameraDist = Math.max(5.5, Math.min(16.5, targetCameraDist + zoomStep));
+      tacticalFeedback.vibrate('tick');
+    };
+
+    dom.addEventListener('touchstart', onTouchStart, { passive: true });
+    dom.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+
+    dom.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    dom.addEventListener('wheel', onWheel, { passive: false });
+
+    // Raycasting for Hover & Click on Planet Mesh
     const raycaster = new THREE.Raycaster();
     const mouseCoord = new THREE.Vector2();
 
@@ -697,42 +830,111 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     };
     dom.addEventListener('mousemove', onHoverCheck);
 
-    // 8. Animation Render Loop
+    const onPlanetClick = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      mouseCoord.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseCoord.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(mouseCoord, camera);
+      const intersects = raycaster.intersectObject(planetMesh);
+      if (intersects.length > 0) {
+        tacticalFeedback.trigger('heavy', 'impact');
+        if (onClickPlanet) {
+          onClickPlanet();
+        }
+      }
+    };
+    dom.addEventListener('click', onPlanetClick);
+
+    // 9. Adaptive Animation Render Loop
     let animId: number;
     let lastTime = performance.now();
+    let frameTimes: number[] = [];
 
     const animate = (time: number) => {
       const delta = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
-      // Smooth pointer parallax
+      // Adaptive Performance Monitoring (scale down pixel ratio if frame drops)
+      if (frameTimes.length < 60) {
+        frameTimes.push(delta);
+      } else {
+        const avgDelta = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+        frameTimes = [];
+        if (avgDelta > 0.028 && currentPixelRatio > 1.0) {
+          currentPixelRatio = 1.0;
+          renderer.setPixelRatio(currentPixelRatio);
+        }
+      }
+
       _mouseCurrent.lerp(_mouseTarget, delta * 4.0);
+
+      // Inertial momentum decay when drag ends
+      if (!isMouseDown && !isInteracting) {
+        if (Math.abs(rotationVelocity) > 0.0001) {
+          if (onRotate) onRotate(rotationVelocity);
+          rotationVelocity *= 0.94;
+        }
+        if (Math.abs(pitchVelocity) > 0.0001) {
+          currentPitch = Math.max(-2.5, Math.min(4.0, currentPitch + pitchVelocity));
+          pitchVelocity *= 0.92;
+        }
+      }
 
       // Planet rotation & parallax
       if (!isPausedRef.current) {
         planetMesh.rotation.y += delta * 0.028;
-        // Clouds rotate at slightly different speed for authentic planetary parallax!
         cloudMesh.rotation.y += delta * 0.042;
         cloudMesh.rotation.x = Math.sin(time * 0.0002) * 0.04;
       }
 
-      // Starfield subtle slow drift
       starField.rotation.y = time * 0.00008;
 
-      // Dynamic reactive tilt from user pointer
       planetGroup.rotation.x = _mouseCurrent.y * 0.15;
       planetGroup.rotation.z = -_mouseCurrent.x * 0.12;
 
-      // Update uniforms
+      // Scene transition animations based on viewMode
+      const currentMode = viewModeRef.current;
+      if (currentMode === 'matrix') {
+        cameraTargetPos.set(0, 3.2, 14.5);
+        cameraTargetFov = 48;
+      } else if (currentMode === 'radar') {
+        cameraTargetPos.set(0, 8.5, 9.5);
+        cameraTargetFov = 52;
+      } else if (currentMode === 'terminal') {
+        cameraTargetPos.set(-2.2, 0.8, 12.0);
+        cameraTargetFov = 44;
+      } else if (currentMode === 'map') {
+        cameraTargetPos.set(0, 0.5, 15.0);
+        cameraTargetFov = 55;
+      } else {
+        cameraTargetPos.set(0, currentPitch, targetCameraDist);
+        cameraTargetFov = 42;
+      }
+
+      camera.position.lerp(cameraTargetPos, delta * 3.8);
+      cameraCurrentLookAt.lerp(cameraLookAtTarget, delta * 3.8);
+      camera.lookAt(cameraCurrentLookAt);
+
+      if (Math.abs(camera.fov - cameraTargetFov) > 0.1) {
+        camera.fov += (cameraTargetFov - camera.fov) * delta * 3.5;
+        camera.updateProjectionMatrix();
+      }
+
       planetUniforms.uTime.value = time * 0.001;
       planetUniforms.uSurge.value = surgeRef.current ? 1.0 : 0.0;
       planetUniforms.uChromatic.value = chromaticRef.current && activeIndexRef.current !== null ? 1.0 : 0.0;
       planetUniforms.uBloom.value = bloomRef.current;
 
-      // Dynamic light tracking
       _vec3.set(-6 - _mouseCurrent.x * 2.0, 4.5 + _mouseCurrent.y * 2.0, 6.5).normalize();
       planetUniforms.uSunDir.value.copy(_vec3);
       sunLight.position.set(_vec3.x * 9, _vec3.y * 9, _vec3.z * 9);
+
+      // In Cinematic Video Mode, let the photorealistic video Earth shine through
+      const isCinematic = cinematicRef.current;
+      planetMesh.visible = !isCinematic;
+      cloudMesh.visible = !isCinematic;
+      starField.visible = !isCinematic;
+      haloMesh.visible = !isCinematic;
 
       renderer.render(scene, camera);
       animId = requestAnimationFrame(animate);
@@ -740,7 +942,6 @@ export const Planet3D: React.FC<Planet3DProps> = ({
 
     animId = requestAnimationFrame(animate);
 
-    // Resize listener
     const onResize = () => {
       if (!container) return;
       const w = container.clientWidth;
@@ -754,15 +955,19 @@ export const Planet3D: React.FC<Planet3DProps> = ({
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', onResize);
-      dom.removeEventListener('mousedown', onPointerDown);
-      dom.removeEventListener('mousemove', onPointerMove);
-      window.removeEventListener('mouseup', onPointerUp);
-      dom.removeEventListener('touchstart', onPointerDown);
-      dom.removeEventListener('touchmove', onPointerMove);
-      window.removeEventListener('touchend', onPointerUp);
-      dom.removeEventListener('mousemove', onHoverCheck);
 
-      // Dispose resources
+      dom.removeEventListener('touchstart', onTouchStart);
+      dom.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+
+      dom.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      dom.removeEventListener('wheel', onWheel);
+
+      dom.removeEventListener('mousemove', onHoverCheck);
+      dom.removeEventListener('click', onPlanetClick);
+
       starGeo.dispose();
       starMat.dispose();
       planetGeo.dispose();
@@ -771,12 +976,6 @@ export const Planet3D: React.FC<Planet3DProps> = ({
       cloudMat.dispose();
       haloGeo.dispose();
       haloMat.dispose();
-
-      textures.diffuseMap.dispose();
-      textures.cloudsMap.dispose();
-      textures.nightLightsMap.dispose();
-      textures.bumpMap.dispose();
-      textures.specularMap.dispose();
 
       renderer.dispose();
       if (dom.parentNode) {

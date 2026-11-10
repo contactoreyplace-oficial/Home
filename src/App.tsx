@@ -7,10 +7,10 @@ import {
   AppGlobalConfig,
   DEFAULT_APP_CONFIG,
   AudioMode,
-  MediaItem
+  MediaItem,
+  getSystemCategoryTag
 } from './types/system';
 import { Planet3D } from './components/Planet3D';
-import { ConstellationSky } from './components/ConstellationSky';
 import { TopNavbar } from './components/TopNavbar';
 import { LocalTelemetry } from './components/LocalTelemetry';
 import { OrbitModules } from './components/OrbitModules';
@@ -31,8 +31,18 @@ import { BrandIdentityModal } from './components/BrandIdentityModal';
 import { DraggableWidget } from './components/DraggableWidget';
 import { WidgetsMenu } from './components/WidgetsMenu';
 import { MapView } from './components/MapView';
+import { EnergyPulseWave } from './components/EnergyPulseWave';
+import { CommandPalette } from './components/CommandPalette';
+import { WeatherOverlay } from './components/WeatherOverlay';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { CelestialSvgBackground } from './components/CelestialSvgBackground';
+import { CinematicVideoBackground } from './components/CinematicVideoBackground';
+import { LightTrailOverlay } from './components/LightTrailOverlay';
+import { ReyplaceCrownHolo } from './components/ReyplaceCrownHolo';
+import { DynamicIslandCapsule } from './components/DynamicIslandCapsule';
 import { soundManager } from './utils/audio';
-import { Eye, ChevronDown, ChevronUp } from 'lucide-react';
+import { tacticalFeedback } from './utils/tacticalFeedback';
+import { Eye, ChevronDown, ChevronUp, X, Radio, Newspaper, Cloud, Volume2, TerminalSquare, Compass } from 'lucide-react';
 
 export default function App() {
   // Systems state with local persistence
@@ -41,7 +51,12 @@ export default function App() {
       const saved = localStorage.getItem('reyplace_ecosistema_systems');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 1) return parsed;
+        if (Array.isArray(parsed) && parsed.length >= 1) {
+          return parsed.map((item: SystemPortal) => ({
+            ...item,
+            categoryTag: item.categoryTag || getSystemCategoryTag(item.category)
+          }));
+        }
       }
     } catch {}
     return DEFAULT_SYSTEMS;
@@ -89,6 +104,18 @@ export default function App() {
   const [zenMode, setZenMode] = useState<boolean>(false);
   const [isHeroCollapsed, setIsHeroCollapsed] = useState<boolean>(false);
 
+  // Cinematic Video vs 3D Interactive Mode (default true for attached video experience)
+  const [cinematicMode, setCinematicMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('reyplace_cinematic_mode');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return true;
+  });
+
+  // Clean Quick Flyout Drawer ('none' | 'telemetry' | 'news' | 'audio' | 'log')
+  const [activeQuickDrawer, setActiveQuickDrawer] = useState<'none' | 'telemetry' | 'news' | 'audio' | 'log'>('none');
+
   // Audio Mode state
   const [audioMode, setAudioMode] = useState<AudioMode>(config.audio.mode);
 
@@ -106,6 +133,9 @@ export default function App() {
   const [activeMediaItem, setActiveMediaItem] = useState<MediaItem | null>(null);
   const [isMediaViewerOpen, setIsMediaViewerOpen] = useState<boolean>(false);
   const [mediaViewerSize, setMediaViewerSize] = useState<'half' | 'full'>('half');
+
+  // Energy pulse wave state
+  const [pulseKey, setPulseKey] = useState<number>(0);
 
   // Loading video sequence state
   const [loadingSystem, setLoadingSystem] = useState<SystemPortal | null>(null);
@@ -143,6 +173,11 @@ export default function App() {
   useEffect(() => {
     soundManager.updateTheme(planetTheme);
   }, [planetTheme]);
+
+  // Dynamic Zen Mode ambient soundscape generator ('deep space vacuum' vs 'nebula hum')
+  useEffect(() => {
+    soundManager.setZenModeSoundscape(zenMode);
+  }, [zenMode]);
 
   // Spatial audio panning when hovering modules or rotating
   useEffect(() => {
@@ -196,10 +231,36 @@ export default function App() {
     setIsMediaViewerOpen(true);
   };
 
+  // Command Palette state
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+
+  // Subtle tactical screen shake recoil state
+  const [shakeClass, setShakeClass] = useState<string>('');
+
+  useEffect(() => {
+    const handleShake = (e: Event) => {
+      const custom = e as CustomEvent<{ intensity?: string }>;
+      const intensity = custom.detail?.intensity || 'subtle';
+      setShakeClass(`tactical-shake-${intensity}`);
+      const t = setTimeout(() => setShakeClass(''), 380);
+      return () => clearTimeout(t);
+    };
+
+    window.addEventListener('reyplace-tactical-shake', handleShake);
+    return () => window.removeEventListener('reyplace-tactical-shake', handleShake);
+  }, []);
+
   // Keyboard shortcut listener
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        tacticalFeedback.vibrate('light');
+        setCommandPaletteOpen((prev) => !prev);
+        return;
+      }
 
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
@@ -217,6 +278,7 @@ export default function App() {
         setIsLoadingVideoOpen(false);
         setIsMediaViewerOpen(false);
         setBrandModalOpen(false);
+        setCommandPaletteOpen(false);
       }
     };
 
@@ -227,7 +289,18 @@ export default function App() {
   const currentlyHoveredSystem = hoveredIndex !== null ? systems[hoveredIndex] : null;
 
   return (
-    <div className="relative w-full min-h-screen bg-[#02060c] text-[#f0faf8] overflow-hidden flex flex-col font-sans select-none">
+    <div className={`relative w-full min-h-screen bg-[#02060c] text-[#f0faf8] overflow-hidden flex flex-col font-sans select-none ${shakeClass}`}>
+      {/* Offline Mode Indicator (Super PWA) */}
+      <OfflineIndicator />
+
+      {/* Atmospheric Weather Overlay (Aurora, Stardust, Wisps synced with Zen Mode) */}
+      <WeatherOverlay
+        mode={config.weather?.mode || 'aurora'}
+        zenMode={zenMode}
+        intensity={config.weather?.intensity || 1.0}
+        theme={planetTheme}
+      />
+
       {/* 0. Custom Animated 3D Cyan Cursor Follower */}
       <CursorFollower
         isHoveringInteractive={hoveredIndex !== null || isHoveringPlanet}
@@ -235,26 +308,14 @@ export default function App() {
         enabled={config.design.enable3DCursor}
       />
 
-      {/* 1. Deep Space Atmospheric Cosmic Color & Nebula Layers */}
-      <div
-        className="fixed inset-0 pointer-events-none z-0"
-        style={{
-          background: `
-            radial-gradient(ellipse at 50% 45%, rgba(6, 36, 58, 0.65) 0%, rgba(4, 18, 30, 0.8) 42%, rgba(2, 8, 16, 0.96) 78%, #010408 100%),
-            radial-gradient(circle at 82% 22%, rgba(168, 85, 247, 0.18) 0%, transparent 45%),
-            radial-gradient(circle at 18% 72%, rgba(0, 240, 255, 0.15) 0%, transparent 42%),
-            radial-gradient(circle at 62% 88%, rgba(244, 63, 94, 0.12) 0%, transparent 40%),
-            #02060c
-          `
-        }}
-      />
-
-      {/* 2. 4K HD Real-Time SVG Deep Space Background & Constellations */}
-      {config.widgets.showConstellations && (
-        <ConstellationSky isNight={isNight} glowIntensity={config.design.glowIntensity} />
+      {/* 1. Celestial Living Background: Cinematic Video (from user attachment) or 4K Vector SVG */}
+      {cinematicMode ? (
+        <CinematicVideoBackground zenMode={zenMode} />
+      ) : (
+        <CelestialSvgBackground zenMode={zenMode} />
       )}
 
-      {/* 3. Top Navigation Bar with Official Brand Logo & Zen Mode Button */}
+      {/* 3. Top Navigation Bar with Official Brand Logo, Mode Toggle & Quick Actions */}
       {config.widgets.showTopNav && (
         <div className={`transition-all duration-500 z-40 ${zenMode ? 'opacity-30 hover:opacity-100' : 'opacity-100'}`}>
           <TopNavbar
@@ -266,6 +327,9 @@ export default function App() {
             onOpenBrandModal={() => {
               soundManager.playSelect();
               setBrandModalOpen(true);
+            }}
+            onOpenCommandPalette={() => {
+              setCommandPaletteOpen(true);
             }}
             onOpenSettings={() => {
               setEditingIndex(0);
@@ -288,6 +352,12 @@ export default function App() {
             }}
             zenMode={zenMode}
             onToggleZenMode={() => setZenMode(!zenMode)}
+            cinematicMode={cinematicMode}
+            onToggleCinematicMode={() => {
+              const next = !cinematicMode;
+              setCinematicMode(next);
+              localStorage.setItem('reyplace_cinematic_mode', String(next));
+            }}
           />
         </div>
       )}
@@ -303,85 +373,106 @@ export default function App() {
             className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#00f0ff]/50 bg-[#030d14]/85 text-[#00f0ff] font-mono text-xs shadow-[0_0_25px_rgba(0,240,255,0.4)] backdrop-blur-xl hover:bg-[#00f0ff] hover:text-black transition-all hover:scale-105"
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>Modo Inmersivo Activo · Clic o tecla 'Z' para ver widgets</span>
+            <span>Modo Inmersivo Activo · Clic o tecla 'Z' para ver controles</span>
           </button>
         </div>
       )}
 
-      {/* 4. Upper Space: Hero Intro Header, News Showcase & Telemetry HUD */}
+      {/* 4. Upper Space: Reyplace 3D Crown Hologram & Dynamic Island Capsule (Clean & Uncluttered) */}
       <div
-        className={`relative z-30 px-4 sm:px-8 mt-2 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pointer-events-auto transition-all duration-500 ${
+        className={`relative z-30 px-4 sm:px-8 mt-2 flex flex-col items-center justify-center gap-2.5 pointer-events-auto transition-all duration-500 ${
           zenMode ? 'opacity-0 pointer-events-none -translate-y-4' : 'opacity-100'
         }`}
       >
-        {/* Left: Compact Hero Intro Header with collapse option */}
-        <div className="max-w-md xl:max-w-lg">
-          <div className="flex items-center gap-2">
-            <div className="font-mono text-[9px] tracking-[0.3em] text-[#8ddcd1] uppercase flex items-center gap-2">
-              <span>{config.texts.eyebrow}</span>
-              <span className="text-[#00f0ff]">•</span>
-              <span className="text-[#a5e6df]/80">{config.texts.brandLocation}</span>
-            </div>
-            <button
-              onClick={() => setIsHeroCollapsed(!isHeroCollapsed)}
-              className="text-[#71c4bd] hover:text-white p-0.5 text-[9px] font-mono"
-              title={isHeroCollapsed ? 'Expandir título' : 'Contraer título'}
-            >
-              {isHeroCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-            </button>
-          </div>
+        {/* 3D Reyplace Crown Insignia (Exact match from video intro 00:00 & 00:07) */}
+        <ReyplaceCrownHolo onClick={() => setBrandModalOpen(true)} />
 
-          {!isHeroCollapsed && (
-            <>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white mt-0.5 mb-0.5 bg-clip-text text-transparent bg-gradient-to-r from-white via-[#a5e6df] to-[#00f0ff]">
-                {config.texts.heroTitle}
-              </h1>
-              <p className="text-xs text-[#c7e5df] leading-relaxed line-clamp-1 sm:line-clamp-2">
-                {config.texts.heroSubtitle}
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Center: Pasarela Multimedia de Novedades (Movable/Static, Collapsed by default) */}
-        {config.widgets.showNewsShowcase && config.news.enabled && (
-          <DraggableWidget
-            id="news"
-            isDraggable={config.widgets.draggableWidgets}
-            title="Novedades"
-            className="w-full lg:w-auto"
-          >
-            <NewsShowcase
-              items={config.news.items}
-              autoplay={config.news.autoplay}
-              intervalSec={config.news.autoplayIntervalSec}
-              widgetOpacity={config.design.widgetOpacity}
-            />
-          </DraggableWidget>
-        )}
-
-        {/* Right: Telemetry GPS/Weather Card (Movable/Static, Compact by default) */}
-        {config.widgets.showTelemetry && (
-          <DraggableWidget
-            id="telemetry"
-            isDraggable={config.widgets.draggableWidgets}
-            title="Telemetría"
-            className="w-full sm:w-auto shrink-0"
-          >
-            <LocalTelemetry
-              isNight={isNight}
-              onNightChange={setIsNight}
-              widgetOpacity={config.design.widgetOpacity}
-            />
-          </DraggableWidget>
-        )}
+        {/* Dynamic Island Capsule: Unified System Status & Telemetry in a single sleek Apple glass pill */}
+        <DynamicIslandCapsule
+          hoveredSystem={currentlyHoveredSystem}
+          onOpenTelemetry={() => setActiveQuickDrawer((prev) => (prev === 'telemetry' ? 'none' : 'telemetry'))}
+          onOpenNews={() => setActiveQuickDrawer((prev) => (prev === 'news' ? 'none' : 'news'))}
+          onSelectSystem={setSelectedSystem}
+        />
       </div>
+
+      {/* Quick Flyout Drawer for focused inspection without screen clutter */}
+      {activeQuickDrawer !== 'none' && !zenMode && (
+        <div className="fixed top-20 right-4 sm:right-8 z-45 animate-fadeIn pointer-events-auto max-w-sm w-full">
+          <div className="relative p-4 rounded-3xl bg-[#04121a]/95 border border-[#71c4bd]/40 backdrop-blur-2xl shadow-[0_25px_70px_rgba(0,0,0,0.9)]">
+            <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#71c4bd]/20">
+              <span className="font-mono text-xs font-bold text-[#00f0ff] uppercase tracking-wider flex items-center gap-2">
+                {activeQuickDrawer === 'telemetry' && <Cloud className="w-4 h-4 text-[#00f0ff]" />}
+                {activeQuickDrawer === 'news' && <Newspaper className="w-4 h-4 text-[#fbbf24]" />}
+                {activeQuickDrawer === 'audio' && <Volume2 className="w-4 h-4 text-[#a855f7]" />}
+                {activeQuickDrawer === 'log' && <TerminalSquare className="w-4 h-4 text-[#10b981]" />}
+                <span>{activeQuickDrawer === 'telemetry' ? 'Telemetría GPS' : activeQuickDrawer === 'news' ? 'Novedades' : activeQuickDrawer === 'audio' ? 'Paisaje Sonoro' : 'Registro APM'}</span>
+              </span>
+              <button
+                onClick={() => setActiveQuickDrawer('none')}
+                className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                title="Cerrar panel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {activeQuickDrawer === 'telemetry' && (
+              <LocalTelemetry isNight={isNight} onNightChange={setIsNight} widgetOpacity={0.9} />
+            )}
+            {activeQuickDrawer === 'news' && (
+              <NewsShowcase items={config.news.items} autoplay={config.news.autoplay} intervalSec={config.news.autoplayIntervalSec} widgetOpacity={0.9} />
+            )}
+            {activeQuickDrawer === 'audio' && (
+              <AudioPlayerWidget currentTheme={planetTheme} audioMode={audioMode} onAudioModeChange={setAudioMode} widgetOpacity={0.9} />
+            )}
+            {activeQuickDrawer === 'log' && (
+              <ScanLog hoveredSystem={currentlyHoveredSystem} widgetOpacity={0.9} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Quick Hub Pills at Bottom-Right for instant drawer access */}
+      {!zenMode && (
+        <div className="fixed bottom-4 right-4 z-30 pointer-events-auto flex items-center gap-1.5 p-1 rounded-full bg-[#030e16]/85 border border-[#71c4bd]/30 backdrop-blur-xl shadow-lg">
+          <button
+            onClick={() => setActiveQuickDrawer((prev) => (prev === 'telemetry' ? 'none' : 'telemetry'))}
+            className={`p-2 rounded-full transition-all ${activeQuickDrawer === 'telemetry' ? 'bg-[#00f0ff] text-black shadow-[0_0_12px_rgba(0,240,255,0.6)]' : 'text-[#8eddd3] hover:text-white hover:bg-white/10'}`}
+            title="Telemetría y Clima"
+          >
+            <Cloud className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setActiveQuickDrawer((prev) => (prev === 'news' ? 'none' : 'news'))}
+            className={`p-2 rounded-full transition-all ${activeQuickDrawer === 'news' ? 'bg-[#fbbf24] text-black shadow-[0_0_12px_rgba(251,191,36,0.6)]' : 'text-[#8eddd3] hover:text-white hover:bg-white/10'}`}
+            title="Novedades del Ecosistema"
+          >
+            <Newspaper className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setActiveQuickDrawer((prev) => (prev === 'audio' ? 'none' : 'audio'))}
+            className={`p-2 rounded-full transition-all ${activeQuickDrawer === 'audio' ? 'bg-[#a855f7] text-white shadow-[0_0_12px_rgba(168,85,247,0.6)]' : 'text-[#8eddd3] hover:text-white hover:bg-white/10'}`}
+            title="Música & Frecuencias"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setActiveQuickDrawer((prev) => (prev === 'log' ? 'none' : 'log'))}
+            className={`p-2 rounded-full transition-all ${activeQuickDrawer === 'log' ? 'bg-[#10b981] text-black shadow-[0_0_12px_rgba(16,185,129,0.6)]' : 'text-[#8eddd3] hover:text-white hover:bg-white/10'}`}
+            title="Registro APM / Log"
+          >
+            <TerminalSquare className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* 5. Main Viewport Container: Pure Unobstructed 3D Photorealistic HD Planet Canvas */}
       <main className="relative flex-1 w-full flex items-center justify-center my-auto min-h-[520px]">
         {/* A. 3D WebGL Photorealistic Planet Layer */}
         <Planet3D
           theme={planetTheme}
+          viewMode={viewMode}
           isPaused={isPaused || viewMode !== 'orbit'}
           orbitAngle={orbitAngle}
           activeSystemIndex={hoveredIndex}
@@ -389,6 +480,10 @@ export default function App() {
           bloomStrength={config.design.bloomStrength * config.design.glowIntensity}
           enableChromaticAberration={config.design.enableChromaticAberration}
           onHoverPlanetChange={setIsHoveringPlanet}
+          onClickPlanet={() => {
+            soundManager.playSelect();
+            setPulseKey(Date.now());
+          }}
           onRotate={(delta) => {
             soundManager.boostInteractionActivity();
             setOrbitAngle((prev) => (prev - delta) % (Math.PI * 2));
@@ -400,7 +495,14 @@ export default function App() {
               setSelectedSystem(sys);
             }
           }}
+          cinematicMode={cinematicMode}
         />
+
+        {/* Energy Pulse Wave Post-Processing Effect */}
+        <EnergyPulseWave triggerKey={pulseKey} />
+
+        {/* Ephemeral Light-Trail Overlay (Touch & Cursor Glow) */}
+        <LightTrailOverlay enabled={true} />
 
         {/* B. Conditional View Overlays */}
         {viewMode === 'orbit' && (
@@ -630,6 +732,32 @@ export default function App() {
         }}
         onPreviewMedia={(mediaItem, size) => {
           handleOpenMediaViewer(mediaItem, size);
+        }}
+      />
+
+      {/* 15. Command Palette (Ctrl+K / Cmd+K) */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        systems={systems}
+        onSelectSystem={(sys) => {
+          setSelectedSystem(sys);
+        }}
+        onLaunchSystem={handleTriggerLaunch}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        planetTheme={planetTheme}
+        onThemeChange={setPlanetTheme}
+        zenMode={zenMode}
+        onToggleZenMode={() => setZenMode((z) => !z)}
+        isPaused={isPaused}
+        onTogglePause={() => setIsPaused((p) => !p)}
+        config={config}
+        onUpdateConfig={handleUpdateConfig}
+        onOpenBrandModal={() => setBrandModalOpen(true)}
+        onOpenSettings={() => {
+          setEditingIndex(0);
+          setSettingsOpen(true);
         }}
       />
     </div>
